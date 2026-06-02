@@ -1,292 +1,371 @@
 --[[
     TierSelectionUI.lua
-    Purpose: Display tier selection pop-up with scrollable horizontal tiers
-    Parent: StarterPlayer > StarterCharacterScripts
+    Purpose: Pop-up Window for Tier Selection (Horizontal Scrollable)
+    Opened when player clicks [Garage/BID] button in Lobby
+    FULLY IMPLEMENTS GAME_ARCHITECTURE Section 2 - Tier Selection UI
+    
+    Flow:
+    1. Player clicks [Garage] button
+    2. TierSelectionUI pop-up opens with 5 tier cards
+    3. Player clicks [SELECT] on a tier
+    4. Money deducted from wallet
+    5. Teleport to RNG Garage
+    6. BidEngine starts
 ]]
 
 local TierSelectionUI = {}
+local Players = game:GetService("Players")
 
--- Configuration
+-- UI Color Theme from GAME_ARCHITECTURE
+local UI_COLORS = {
+    PRIMARY_CYAN = Color3.fromRGB(0, 212, 255),
+    PRIMARY_PURPLE = Color3.fromRGB(123, 44, 191),
+    ACCENT_GREEN = Color3.fromRGB(0, 255, 65),
+    ACCENT_RED = Color3.fromRGB(255, 23, 68),
+    DARK_BLUE = Color3.fromRGB(26, 31, 113)
+}
+
+-- Tier specifications from GAME_ARCHITECTURE
 local TIER_DATA = {
     {
         name = "BEGINNER",
-        cost = 200,
-        minDeco = 4,
-        maxDeco = 7,
-        color = Color3.fromRGB(0, 212, 255) -- Cyan
+        price = 200,
+        decoRange = "4-7",
+        color = Color3.fromRGB(100, 200, 255)
     },
     {
         name = "ADVANCED",
-        cost = 500,
-        minDeco = 7,
-        maxDeco = 13,
-        color = Color3.fromRGB(0, 212, 255)
+        price = 500,
+        decoRange = "7-13",
+        color = Color3.fromRGB(150, 150, 255)
     },
     {
         name = "EXPERT",
-        cost = 1200,
-        minDeco = 13,
-        maxDeco = 21,
-        color = Color3.fromRGB(0, 212, 255)
+        price = 1200,
+        decoRange = "13-21",
+        color = Color3.fromRGB(200, 100, 255)
     },
     {
         name = "CHOSEN",
-        cost = 2500,
-        minDeco = 21,
-        maxDeco = 50,
-        color = Color3.fromRGB(0, 212, 255)
+        price = 2500,
+        decoRange = "21-50",
+        color = Color3.fromRGB(255, 100, 200)
     },
     {
         name = "TIER 5",
-        cost = 5000,
-        minDeco = 50,
-        maxDeco = 80,
-        color = Color3.fromRGB(0, 212, 255)
+        price = 5000,
+        decoRange = "50-80",
+        color = Color3.fromRGB(255, 200, 100)
     }
 }
 
-local COLORS = {
-    PRIMARY_CYAN = Color3.fromRGB(0, 212, 255),
-    PRIMARY_PURPLE = Color3.fromRGB(123, 44, 191),
-    DARK_BLUE = Color3.fromRGB(26, 31, 113),
-    WHITE = Color3.fromRGB(255, 255, 255),
-    SEMI_TRANSPARENT = Color3.fromRGB(0, 0, 0)
-}
-
-local screenSize = nil
-local screenGui = nil
-local scrollFrame = nil
-
 --[[
-    Create the main Tier Selection UI
-]]
-function TierSelectionUI:Create()
-    local playerGui = game.Players.LocalPlayer:WaitForChild("PlayerGui")
-    screenSize = playerGui.Parent.AbsoluteSize
+    Show Tier Selection UI
+    GAME_ARCHITECTURE: "Player clicks [Garage] button → TierSelectionUI opens"
     
-    -- Main ScreenGui
-    screenGui = Instance.new("ScreenGui")
+    @param playerId: string - Player ID
+    @param PlayerDataManager: module - Player data manager
+    @return: table - ScreenGui reference
+]]
+function TierSelectionUI:ShowTierSelection(playerId, PlayerDataManager)
+    local player = Players:FindFirstChild(tostring(playerId))
+    if not player then
+        return nil
+    end
+
+    local playerGui = player:WaitForChild("PlayerGui")
+    
+    -- Remove existing Tier Selection UI if present
+    local existingUI = playerGui:FindFirstChild("TierSelectionUI")
+    if existingUI then
+        existingUI:Destroy()
+    end
+
+    -- Create main ScreenGui
+    local screenGui = Instance.new("ScreenGui")
     screenGui.Name = "TierSelectionUI"
     screenGui.ResetOnSpawn = false
     screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
     screenGui.Parent = playerGui
-    
-    -- Semi-transparent background
-    local background = Instance.new("TextLabel")
-    background.Name = "Background"
-    background.Size = UDim2.new(1, 0, 1, 0)
-    background.Position = UDim2.new(0, 0, 0, 0)
-    background.BackgroundColor3 = COLORS.SEMI_TRANSPARENT
-    background.BackgroundTransparency = 0.5
-    background.TextTransparency = 1
-    background.ZIndex = 1
-    background.Parent = screenGui
-    
-    -- Pop-up frame (container)
+
+    -- ========== MAIN BACKGROUND ==========
+    -- Dark semi-transparent overlay
+    local overlay = Instance.new("Frame")
+    overlay.Name = "Overlay"
+    overlay.Size = UDim2.new(1, 0, 1, 0)
+    overlay.Position = UDim2.new(0, 0, 0, 0)
+    overlay.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+    overlay.BackgroundTransparency = 0.4
+    overlay.BorderSizePixel = 0
+    overlay.Parent = screenGui
+
+    -- ========== POP-UP WINDOW ==========
     local popupFrame = Instance.new("Frame")
     popupFrame.Name = "PopupFrame"
-    popupFrame.Size = UDim2.new(0, 900, 0, 300)
-    popupFrame.Position = UDim2.new(0.5, -450, 0.5, -150) -- Center on screen
-    popupFrame.BackgroundColor3 = COLORS.DARK_BLUE
+    popupFrame.Size = UDim2.new(0, 1000, 0, 300)
+    popupFrame.Position = UDim2.new(0.5, -500, 0.5, -150)
+    popupFrame.BackgroundColor3 = UI_COLORS.DARK_BLUE
     popupFrame.BorderSizePixel = 2
-    popupFrame.BorderColor3 = COLORS.PRIMARY_CYAN
-    popupFrame.ZIndex = 2
+    popupFrame.BorderColor3 = UI_COLORS.PRIMARY_CYAN
     popupFrame.Parent = screenGui
-    
-    -- Gradient background (using UIGradient)
-    local gradient = Instance.new("UIGradient")
-    gradient.Color = ColorSequence.new({
-        ColorSequenceKeypoint.new(0, COLORS.PRIMARY_CYAN),
-        ColorSequenceKeypoint.new(1, COLORS.PRIMARY_PURPLE)
-    })
-    gradient.Rotation = 90
-    gradient.Parent = popupFrame
-    
-    -- Close button (X)
-    local closeButton = Instance.new("TextButton")
-    closeButton.Name = "CloseButton"
-    closeButton.Size = UDim2.new(0, 40, 0, 40)
-    closeButton.Position = UDim2.new(1, -50, 0, 10)
-    closeButton.BackgroundColor3 = COLORS.PRIMARY_PURPLE
-    closeButton.TextColor3 = COLORS.WHITE
-    closeButton.TextSize = 24
-    closeButton.Text = "✕"
-    closeButton.ZIndex = 3
-    closeButton.Parent = popupFrame
-    
-    closeButton.MouseButton1Click:Connect(function()
-        self:Hide()
-    end)
-    
+
     -- Title
-    local title = Instance.new("TextLabel")
-    title.Name = "Title"
-    title.Size = UDim2.new(1, -60, 0, 50)
-    title.Position = UDim2.new(0, 20, 0, 10)
-    title.BackgroundTransparency = 1
-    title.TextColor3 = COLORS.WHITE
-    title.TextSize = 28
-    title.TextScaled = true
-    title.Text = "SELECT YOUR BID TIER"
-    title.Font = Enum.Font.GothamBold
-    title.ZIndex = 3
-    title.Parent = popupFrame
-    
-    -- ScrollFrame for tiers
-    scrollFrame = Instance.new("ScrollingFrame")
-    scrollFrame.Name = "ScrollFrame"
-    scrollFrame.Size = UDim2.new(1, -40, 0, 180)
-    scrollFrame.Position = UDim2.new(0, 20, 0, 70)
-    scrollFrame.BackgroundTransparency = 1
-    scrollFrame.BorderSizePixel = 0
-    scrollFrame.ScrollBarThickness = 8
-    scrollFrame.CanvasSize = UDim2.new(0, 450 * #TIER_DATA, 0, 180)
-    scrollFrame.ScrollDirection = Enum.ScrollDirection.X
-    scrollFrame.ZIndex = 3
-    scrollFrame.Parent = popupFrame
-    
-    -- Create tier buttons
-    for i, tierInfo in ipairs(TIER_DATA) do
-        self:CreateTierButton(scrollFrame, tierInfo, i)
+    local titleLabel = Instance.new("TextLabel")
+    titleLabel.Name = "TitleLabel"
+    titleLabel.Size = UDim2.new(1, -60, 0, 50)
+    titleLabel.Position = UDim2.new(0, 20, 0, 10)
+    titleLabel.BackgroundTransparency = 1
+    titleLabel.Text = "SELECT YOUR BID TIER"
+    titleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+    titleLabel.TextSize = 28
+    titleLabel.Font = Enum.Font.GothamBold
+    titleLabel.Parent = popupFrame
+
+    -- ========== CLOSE BUTTON (X) ==========
+    local closeBtn = Instance.new("TextButton")
+    closeBtn.Name = "CloseButton"
+    closeBtn.Size = UDim2.new(0, 40, 0, 40)
+    closeBtn.Position = UDim2.new(1, -50, 0, 10)
+    closeBtn.BackgroundColor3 = UI_COLORS.ACCENT_RED
+    closeBtn.BorderSizePixel = 0
+    closeBtn.Text = "X"
+    closeBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    closeBtn.TextSize = 20
+    closeBtn.Font = Enum.Font.GothamBold
+    closeBtn.Parent = popupFrame
+
+    closeBtn.MouseButton1Click:Connect(function()
+        screenGui:Destroy()
+    end)
+
+    -- ========== SCROLL CONTAINER ==========
+    local scrollContainer = Instance.new("Frame")
+    scrollContainer.Name = "ScrollContainer"
+    scrollContainer.Size = UDim2.new(1, -40, 0, 180)
+    scrollContainer.Position = UDim2.new(0, 20, 0, 70)
+    scrollContainer.BackgroundTransparency = 1
+    scrollContainer.BorderSizePixel = 0
+    scrollContainer.ClipsDescendants = true
+    scrollContainer.Parent = popupFrame
+
+    -- ScrollingFrame for horizontal scroll
+    local scrollingFrame = Instance.new("ScrollingFrame")
+    scrollingFrame.Name = "ScrollingFrame"
+    scrollingFrame.Size = UDim2.new(1, 0, 1, 0)
+    scrollingFrame.Position = UDim2.new(0, 0, 0, 0)
+    scrollingFrame.BackgroundTransparency = 1
+    scrollingFrame.BorderSizePixel = 0
+    scrollingFrame.ScrollBarThickness = 0
+    scrollingFrame.CanvasSize = UDim2.new(0, #TIER_DATA * 180, 0, 0)
+    scrollingFrame.ScrollDirection = Enum.ScrollDirection.X
+    scrollingFrame.Parent = scrollContainer
+
+    -- UIListLayout for horizontal arrangement
+    local listLayout = Instance.new("UIListLayout")
+    listLayout.Orientation = Enum.Orientation.Horizontal
+    listLayout.Padding = UDim.new(0, 20)
+    listLayout.HorizontalAlignment = Enum.HorizontalAlignment.Left
+    listLayout.VerticalAlignment = Enum.VerticalAlignment.Center
+    listLayout.Parent = scrollingFrame
+
+    -- ========== CREATE TIER CARDS ==========
+    for tierIndex, tierData in ipairs(TIER_DATA) do
+        local tierCard = self:CreateTierCard(
+            tierData,
+            tierIndex,
+            playerId,
+            PlayerDataManager,
+            screenGui
+        )
+        tierCard.Parent = scrollingFrame
     end
+
+    -- ========== LEFT/RIGHT ARROW BUTTONS ==========
     
-    print("[TierSelectionUI] Created successfully")
+    -- Left Arrow Button
+    local leftArrowBtn = Instance.new("TextButton")
+    leftArrowBtn.Name = "LeftArrow"
+    leftArrowBtn.Size = UDim2.new(0, 40, 0, 40)
+    leftArrowBtn.Position = UDim2.new(0, 5, 0.5, -20)
+    leftArrowBtn.BackgroundColor3 = UI_COLORS.PRIMARY_CYAN
+    leftArrowBtn.BorderSizePixel = 0
+    leftArrowBtn.Text = "<"
+    leftArrowBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    leftArrowBtn.TextSize = 24
+    leftArrowBtn.Font = Enum.Font.GothamBold
+    leftArrowBtn.Parent = popupFrame
+    
+    leftArrowBtn.MouseButton1Click:Connect(function()
+        scrollingFrame.CanvasPosition = Vector2.new(
+            math.max(0, scrollingFrame.CanvasPosition.X - 180),
+            0
+        )
+    end)
+
+    -- Right Arrow Button
+    local rightArrowBtn = Instance.new("TextButton")
+    rightArrowBtn.Name = "RightArrow"
+    rightArrowBtn.Size = UDim2.new(0, 40, 0, 40)
+    rightArrowBtn.Position = UDim2.new(1, -45, 0.5, -20)
+    rightArrowBtn.BackgroundColor3 = UI_COLORS.PRIMARY_CYAN
+    rightArrowBtn.BorderSizePixel = 0
+    rightArrowBtn.Text = ">"
+    rightArrowBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    rightArrowBtn.TextSize = 24
+    rightArrowBtn.Font = Enum.Font.GothamBold
+    rightArrowBtn.Parent = popupFrame
+    
+    rightArrowBtn.MouseButton1Click:Connect(function()
+        scrollingFrame.CanvasPosition = Vector2.new(
+            math.min(scrollingFrame.CanvasSize.X.Offset - scrollingFrame.AbsoluteSize.X, 
+                     scrollingFrame.CanvasPosition.X + 180),
+            0
+        )
+    end)
+
+    print("[TierSelectionUI] Tier selection UI opened for player " .. tostring(playerId))
     return screenGui
 end
 
 --[[
-    Create individual tier button
+    Create a single tier card
+    GAME_ARCHITECTURE: Tier Cards Show:
+    - Tier name (large text)
+    - Entry price (large cyan text)
+    - Estimated decorations range (small text)
+    - [SELECT] button on each tier
+    
+    @param tierData: table - Tier information
+    @param tierIndex: number - Index in tier list
+    @param playerId: string - Player ID
+    @param PlayerDataManager: module - Player data manager
+    @param screenGui: table - Parent ScreenGui
+    @return: table - Frame instance
 ]]
-function TierSelectionUI:CreateTierButton(parent, tierInfo, index)
-    -- Tier button container
-    local tierButton = Instance.new("TextButton")
-    tierButton.Name = "Tier_" .. tierInfo.name
-    tierButton.Size = UDim2.new(0, 420, 0, 180)
-    tierButton.Position = UDim2.new(0, (index - 1) * 430, 0, 0)
-    tierButton.BackgroundColor3 = COLORS.DARK_BLUE
-    tierButton.BorderColor3 = tierInfo.color
-    tierButton.BorderSizePixel = 3
-    tierButton.Text = ""
-    tierButton.ZIndex = 3
-    tierButton.Parent = parent
-    
-    -- Hover effect
-    local originalColor = tierButton.BackgroundColor3
-    tierButton.MouseEnter:Connect(function()
-        tierButton.BackgroundColor3 = Color3.fromRGB(40, 50, 120)
+function TierSelectionUI:CreateTierCard(tierData, tierIndex, playerId, PlayerDataManager, screenGui)
+    local card = Instance.new("Frame")
+    card.Name = "TierCard_" .. tierData.name
+    card.Size = UDim2.new(0, 160, 1, 0)
+    card.BackgroundColor3 = Color3.fromRGB(40, 40, 60)
+    card.BorderSizePixel = 2
+    card.BorderColor3 = tierData.color
+    card.Parent = nil  -- Will be parented to scrollingFrame
+
+    -- Tier Name
+    local tierNameLabel = Instance.new("TextLabel")
+    tierNameLabel.Name = "TierName"
+    tierNameLabel.Size = UDim2.new(1, 0, 0.25, 0)
+    tierNameLabel.Position = UDim2.new(0, 0, 0.05, 0)
+    tierNameLabel.BackgroundTransparency = 1
+    tierNameLabel.Text = tierData.name
+    tierNameLabel.TextColor3 = tierData.color
+    tierNameLabel.TextSize = 16
+    tierNameLabel.Font = Enum.Font.GothamBold
+    tierNameLabel.Parent = card
+
+    -- Entry Price (LARGE CYAN)
+    local priceLabel = Instance.new("TextLabel")
+    priceLabel.Name = "Price"
+    priceLabel.Size = UDim2.new(1, 0, 0.3, 0)
+    priceLabel.Position = UDim2.new(0, 0, 0.3, 0)
+    priceLabel.BackgroundTransparency = 1
+    priceLabel.Text = "$" .. tostring(tierData.price)
+    priceLabel.TextColor3 = UI_COLORS.PRIMARY_CYAN
+    priceLabel.TextSize = 18
+    priceLabel.Font = Enum.Font.GothamBold
+    priceLabel.Parent = card
+
+    -- Decoration Range (small text)
+    local decoLabel = Instance.new("TextLabel")
+    decoLabel.Name = "DecoRange"
+    decoLabel.Size = UDim2.new(1, 0, 0.15, 0)
+    decoLabel.Position = UDim2.new(0, 0, 0.6, 0)
+    decoLabel.BackgroundTransparency = 1
+    decoLabel.Text = "Decos: " .. tierData.decoRange
+    decoLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+    decoLabel.TextSize = 10
+    decoLabel.Font = Enum.Font.Gotham
+    decoLabel.Parent = card
+
+    -- SELECT Button
+    local selectBtn = Instance.new("TextButton")
+    selectBtn.Name = "SelectButton"
+    selectBtn.Size = UDim2.new(0.8, 0, 0.2, 0)
+    selectBtn.Position = UDim2.new(0.1, 0, 0.8, 0)
+    selectBtn.BackgroundColor3 = UI_COLORS.ACCENT_GREEN
+    selectBtn.BorderSizePixel = 0
+    selectBtn.Text = "SELECT"
+    selectBtn.TextColor3 = Color3.fromRGB(0, 0, 0)
+    selectBtn.TextSize = 12
+    selectBtn.Font = Enum.Font.GothamBold
+    selectBtn.Parent = card
+
+    -- SELECT button hover effect
+    selectBtn.MouseEnter:Connect(function()
+        selectBtn.BackgroundColor3 = Color3.fromRGB(150, 255, 150)
     end)
-    
-    tierButton.MouseLeave:Connect(function()
-        tierButton.BackgroundColor3 = originalColor
+
+    selectBtn.MouseLeave:Connect(function()
+        selectBtn.BackgroundColor3 = UI_COLORS.ACCENT_GREEN
     end)
-    
-    -- Tier name
-    local tierName = Instance.new("TextLabel")
-    tierName.Name = "Name"
-    tierName.Size = UDim2.new(1, -20, 0, 50)
-    tierName.Position = UDim2.new(0, 10, 0, 10)
-    tierName.BackgroundTransparency = 1
-    tierName.TextColor3 = tierInfo.color
-    tierName.TextSize = 24
-    tierName.TextScaled = true
-    tierName.Text = tierInfo.name
-    tierName.Font = Enum.Font.GothamBold
-    tierName.ZIndex = 4
-    tierName.Parent = tierButton
-    
-    -- Tier cost
-    local tierCost = Instance.new("TextLabel")
-    tierCost.Name = "Cost"
-    tierCost.Size = UDim2.new(1, -20, 0, 40)
-    tierCost.Position = UDim2.new(0, 10, 0, 50)
-    tierCost.BackgroundTransparency = 1
-    tierCost.TextColor3 = COLORS.WHITE
-    tierCost.TextSize = 18
-    tierCost.Text = "$" .. tostring(tierInfo.cost)
-    tierCost.Font = Enum.Font.Gotham
-    tierCost.ZIndex = 4
-    tierCost.Parent = tierButton
-    
-    -- Decorations range
-    local decoRange = Instance.new("TextLabel")
-    decoRange.Name = "DecoRange"
-    decoRange.Size = UDim2.new(1, -20, 0, 40)
-    decoRange.Position = UDim2.new(0, 10, 0, 90)
-    decoRange.BackgroundTransparency = 1
-    decoRange.TextColor3 = Color3.fromRGB(150, 150, 150)
-    decoRange.TextSize = 14
-    decoRange.Text = "Decorations: " .. tostring(tierInfo.minDeco) .. "-" .. tostring(tierInfo.maxDeco)
-    decoRange.Font = Enum.Font.Gotham
-    decoRange.ZIndex = 4
-    decoRange.Parent = tierButton
-    
-    -- Select button
-    local selectButton = Instance.new("TextButton")
-    selectButton.Name = "SelectButton"
-    selectButton.Size = UDim2.new(0.8, 0, 0, 30)
-    selectButton.Position = UDim2.new(0.1, 0, 0.8, 10)
-    selectButton.BackgroundColor3 = tierInfo.color
-    selectButton.TextColor3 = COLORS.DARK_BLUE
-    selectButton.TextSize = 16
-    selectButton.Text = "SELECT"
-    selectButton.Font = Enum.Font.GothamBold
-    selectButton.ZIndex = 5
-    selectButton.Parent = tierButton
-    
-    selectButton.MouseButton1Click:Connect(function()
-        self:SelectTier(tierInfo)
+
+    -- SELECT button click handler
+    selectBtn.MouseButton1Click:Connect(function()
+        self:SelectTier(playerId, tierData, PlayerDataManager, screenGui)
     end)
+
+    return card
 end
 
 --[[
     Handle tier selection
-]]
-function TierSelectionUI:SelectTier(tierInfo)
-    print("[TierSelectionUI] Selected tier: " .. tierInfo.name .. " (Cost: $" .. tierInfo.cost .. ")")
+    GAME_ARCHITECTURE: "Click [SELECT] on tier → Deduct money → Teleport to RNG Garage"
     
-    -- Fire event to server
-    local RemoteEvent = game.ReplicatedStorage:FindFirstChild("SelectTier")
-    if RemoteEvent then
-        RemoteEvent:FireServer(tierInfo.name, tierInfo.cost)
-    else
-        warn("SelectTier RemoteEvent not found")
-    end
+    @param playerId: string - Player ID
+    @param tierData: table - Selected tier data
+    @param PlayerDataManager: module - Player data manager
+    @param screenGui: table - UI to close
+]]
+function TierSelectionUI:SelectTier(playerId, tierData, PlayerDataManager, screenGui)
+    local player = PlayerDataManager:GetPlayer(playerId)
     
-    -- Hide UI after selection
-    self:Hide()
-end
-
---[[
-    Show the UI
-]]
-function TierSelectionUI:Show()
-    if screenGui then
-        screenGui.Enabled = true
-    else
-        self:Create()
+    -- Check if player has enough money
+    if player.money < tierData.price then
+        print("[TierSelectionUI] Player " .. tostring(playerId) .. " cannot afford tier " .. tierData.name)
+        return
     end
-    print("[TierSelectionUI] Shown")
-end
 
---[[
-    Hide the UI
-]]
-function TierSelectionUI:Hide()
-    if screenGui then
-        screenGui.Enabled = false
+    -- Deduct money
+    PlayerDataManager:UpdateMoney(playerId, -tierData.price)
+    print("[TierSelectionUI] Deducted $" .. tierData.price .. " from player " .. tostring(playerId))
+
+    -- Close UI
+    screenGui:Destroy()
+
+    -- Start bid and teleport to RNG Garage
+    local BidEngine = require(script.Parent.Parent:WaitForChild("managers"):WaitForChild("BidEngine"))
+    local TeleportManager = require(script.Parent.Parent:WaitForChild("managers"):WaitForChild("TeleportManager"))
+
+    -- Start bid session
+    local bidSession = BidEngine:StartBid(playerId, tierData.name, tierData.price)
+    
+    if bidSession then
+        print("[TierSelectionUI] Started bid session for tier " .. tierData.name)
+        
+        -- Teleport to RNG Garage
+        TeleportManager:TeleportToRNGGarage(playerId, tierData.name)
+        print("[TierSelectionUI] Teleported player " .. tostring(playerId) .. " to RNG Garage")
     end
-    print("[TierSelectionUI] Hidden")
 end
 
 --[[
-    Destroy the UI
+    Hide/destroy tier selection UI
+    @param screenGui: table - ScreenGui instance
 ]]
-function TierSelectionUI:Destroy()
+function TierSelectionUI:HideTierSelection(screenGui)
     if screenGui then
         screenGui:Destroy()
-        screenGui = nil
     end
-    print("[TierSelectionUI] Destroyed")
 end
 
 return TierSelectionUI
